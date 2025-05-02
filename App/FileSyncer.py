@@ -1,151 +1,127 @@
-import os
-import sys
-import hashlib
-import requests
-import json
+"""
+SimpleFileUpdater · FileSyncer
+──────────────────────────────
+负责：下载远程配置／文件、MD5 校验、同步本地文件
+仅支持“键值对”配置格式：  LocalPath = RemoteUrl
+"""
 
-def CalculateMd5(FilePath):
-    """计算文件的MD5哈希值"""
-    if not os.path.exists(FilePath):
+from __future__ import annotations
+import os, sys, hashlib, requests, tempfile, shutil
+from typing import Dict, Tuple, Optional
+
+CHUNK_SIZE = 8192          # 每块 8 KB
+VERBOSE = True             # True → 打印调试信息
+
+
+def Debug(msg: str) -> None:
+    if VERBOSE:
+        print(f"  [DEBUG] {msg}")
+
+
+# ──────────────────── 基础工具 ────────────────────
+def FileMd5(path: str) -> Optional[str]:
+    if not os.path.exists(path):
         return None
-    
-    with open(FilePath, 'rb') as File:
-        Md5Hash = hashlib.md5()
-        for Chunk in iter(lambda: File.read(4096), b''):
-            Md5Hash.update(Chunk)
-        return Md5Hash.hexdigest()
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(CHUNK_SIZE), b""):
+            h.update(block)
+    return h.hexdigest()
 
-def DisplayProgressBar(Iteration, Total, BarLength=50):
-    """在命令行显示进度条"""
-    Progress = float(Iteration) / float(Total)
-    Arrow = '=' * int(round(Progress * BarLength) - 1) + '>'
-    Spaces = ' ' * (BarLength - len(Arrow))
-    
-    sys.stdout.write(f"\r进度: [{Arrow}{Spaces}] {int(Progress * 100)}%")
+
+def PrintProgress(done: int, total: int, width: int = 50) -> None:
+    if total == 0:
+        return
+    ratio = done / total
+    bar   = "=" * int(ratio * width - 1) + ">" if ratio < 1 else "=" * width
+    sys.stdout.write(f"\r进度: [{bar:<{width}}] {ratio * 100:6.2f}%")
     sys.stdout.flush()
-    
-    if Iteration == Total:
-        sys.stdout.write('\n')
+    if done >= total:
+        sys.stdout.write("\n")
 
-def DownloadFileWithProgress(Url, FilePath):
-    """下载文件并显示进度条"""
+
+# ──────────────────── 网络下载 ───────────────────
+def DownloadToTemp(url: str) -> Tuple[Optional[str], Optional[str]]:
+    """下载到临时文件（关闭 gzip），返回 (TmpPath, Error)"""
     try:
-        Response = requests.get(Url, stream=True)
-        if Response.status_code != 200:
-            return None, f"HTTP状态码 {Response.status_code}"
-        
-        # 获取文件大小
-        TotalSize = int(Response.headers.get('content-length', 0))
-        
-        # 如果无法获取大小，直接下载
-        if TotalSize == 0:
-            return Response.content, None
-        
-        # 分块下载，显示进度
-        DownloadedSize = 0
-        Chunks = []
-        
-        for Data in Response.iter_content(chunk_size=4096):
-            DownloadedSize += len(Data)
-            Chunks.append(Data)
-            DisplayProgressBar(DownloadedSize, TotalSize)
-            
-        return b''.join(Chunks), None
-    except requests.exceptions.RequestException as Error:
-        return None, str(Error)
+        headers = {"Accept-Encoding": "identity"}
+        with requests.get(url, stream=True, timeout=30, headers=headers) as r:
+            r.raise_for_status()
 
-def LoadConfigFromUrl(ConfigUrl):
-    """从URL加载配置文件"""
+            total = int(r.headers.get("Content-Length", 0))
+            Debug(f"Content-Length: {total}")
+            Debug(f"Content-Type   : {r.headers.get('Content-Type')}")
+            Debug(f"Transfer-Enc   : {r.headers.get('Transfer-Encoding', 'None')}")
+
+            downloaded = 0
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                for chunk in r.iter_content(CHUNK_SIZE):
+                    if chunk:
+                        tmp.write(chunk)
+                        downloaded += len(chunk)
+                        if total:
+                            PrintProgress(downloaded, total)
+            Debug(f"Downloaded      : {downloaded}")
+            return tmp.name, None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+# ──────────────────── 配置加载 ───────────────────
+def LoadConfigFromUrl(url: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    """仅支持键值对格式；失败返回错误文本"""
     try:
-        print(f"正在从 {ConfigUrl} 下载配置...")
-        Response = requests.get(ConfigUrl)
-        if Response.status_code != 200:
-            return None, f"无法下载配置文件，HTTP状态码: {Response.status_code}"
-        
-        # 优先使用KV格式解析（每行一个键值对，格式为key = value）
-        ConfigData = {}
-        Lines = Response.text.strip().split('\n')
-        
-        # 过滤掉空行和注释行
-        ValidLines = [Line for Line in Lines if Line.strip() and not Line.strip().startswith('#')]
-        
-        for Line in ValidLines:
-            Parts = Line.split('=', 1)
-            if len(Parts) == 2:
-                Key = Parts[0].strip()
-                Value = Parts[1].strip()
-                ConfigData[Key] = Value
-        
-        # 如果成功解析为KV格式，直接返回
-        if ConfigData:
-            print("已成功使用键值对格式解析配置文件")
-            return ConfigData, None
-        
-        # 如果KV格式解析失败，尝试JSON格式
-        try:
-            print("键值对格式解析失败，尝试使用JSON格式...")
-            ConfigData = json.loads(Response.text)
-            print("已成功使用JSON格式解析配置文件")
-            return ConfigData, None
-        except json.JSONDecodeError:
-            return None, "配置文件格式无法识别，既不是有效的键值对格式也不是有效的JSON格式"
-            
-    except requests.exceptions.RequestException as Error:
-        return None, f"下载配置出错: {str(Error)}"
-    except Exception as Error:
-        return None, f"处理配置文件时出错: {str(Error)}"
-
-def SyncFiles(FileMapping):
-    """
-    同步本地文件与远程文件
-    
-    参数:
-        FileMapping: 字典，键是本地文件路径，值是远程URL
-    """
-    TotalFiles = len(FileMapping)
-    CurrentFile = 0
-    
-    print(f"开始同步 {TotalFiles} 个文件...")
-    
-    for LocalPath, RemoteUrl in FileMapping.items():
-        CurrentFile += 1
-        try:
-            print(f"\n[{CurrentFile}/{TotalFiles}] 正在处理: {LocalPath}")
-            
-            # 创建目录（如果不存在）
-            Directory = os.path.dirname(LocalPath)
-            if Directory and not os.path.exists(Directory):
-                os.makedirs(Directory, exist_ok=True)
-            
-            # 下载远程文件并显示进度
-            print(f"下载中: {RemoteUrl}")
-            RemoteData, Error = DownloadFileWithProgress(RemoteUrl, LocalPath)
-            
-            if Error or RemoteData is None:
-                print(f"下载失败: {LocalPath} - {Error}")
+        Debug(f"下载配置 → {url}")
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        mapping: Dict[str, str] = {}
+        for line in resp.text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
                 continue
-            
-            # 计算远程文件的MD5
-            RemoteMd5 = hashlib.md5(RemoteData).hexdigest()
-            
-            # 计算本地文件的MD5（如果存在）
-            LocalMd5 = CalculateMd5(LocalPath)
-            
-            # 如果本地文件不存在或MD5不同，则更新文件
-            if LocalMd5 is None:
-                with open(LocalPath, 'wb') as File:
-                    File.write(RemoteData)
-                print(f"已创建: {LocalPath}")
-            elif LocalMd5 != RemoteMd5:
-                with open(LocalPath, 'wb') as File:
-                    File.write(RemoteData)
-                print(f"已更新: {LocalPath}")
-            else:
-                print(f"已是最新: {LocalPath}")
-                
-        except IOError as Error:
-            print(f"文件操作出错: {LocalPath} - {str(Error)}")
-        except Exception as Error:
-            print(f"处理时发生未知错误: {LocalPath} - {str(Error)}")
-    
-    print(f"\n同步完成。总计: {TotalFiles} 个文件")
+            if "=" in line:
+                k, v = map(str.strip, line.split("=", 1))
+                mapping[k] = v
+        if mapping:
+            Debug("配置解析成功：键值对格式")
+            return mapping, None
+        return None, "配置文件为空或无法解析为键值对格式"
+    except Exception as e:
+        return None, f"配置下载失败: {e}"
+
+
+# ──────────────────── 同步逻辑 ───────────────────
+def SyncOne(local: str, url: str) -> None:
+    Debug(f"下载链接 → {url}")
+    tmp_path, err = DownloadToTemp(url)
+    if err:
+        print(f"❌ 下载失败: {err}")
+        return
+
+    remote_md5 = FileMd5(tmp_path)
+    local_md5  = FileMd5(local)
+    Debug(f"远端 MD5: {remote_md5}")
+    Debug(f"本地 MD5: {local_md5 or 'None'}")
+
+    if remote_md5 == local_md5:
+        os.remove(tmp_path)
+        print("✔ 已是最新")
+        return
+
+    os.makedirs(os.path.dirname(local) or ".", exist_ok=True)
+    shutil.move(tmp_path, local)
+    print("🆕 已创建" if local_md5 is None else "🔄 已更新")
+
+
+def SyncFiles(mapping: Dict[str, str]) -> None:
+    total = len(mapping)
+    print(f"\n开始同步，共 {total} 个文件\n")
+    for idx, (local, url) in enumerate(mapping.items(), 1):
+        print(f"[{idx}/{total}] 处理: {local}")
+        try:
+            SyncOne(local, url)
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"❌ 未知错误: {e}")
+    print("\n✅ 同步完成")
