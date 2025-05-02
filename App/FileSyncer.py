@@ -1,24 +1,24 @@
 """
 SimpleFileUpdater · FileSyncer
 ──────────────────────────────
-负责：下载远程配置／文件、MD5 校验、同步本地文件
-仅支持“键值对”配置格式：  LocalPath = RemoteUrl
+核心同步模块，仅支持“键值对”配置格式：
+    LocalPath = RemoteUrl
 """
 
 from __future__ import annotations
 import os, sys, hashlib, requests, tempfile, shutil
 from typing import Dict, Tuple, Optional
 
-CHUNK_SIZE = 8192          # 每块 8 KB
-VERBOSE = True             # True → 打印调试信息
+CHUNK_SIZE: int = 8192      # 每次读取 8 KB
+VERBOSE: bool = True        # True → 打印 DEBUG 日志
 
 
+# ──────────────────── 工具 ────────────────────
 def Debug(msg: str) -> None:
     if VERBOSE:
         print(f"  [DEBUG] {msg}")
 
 
-# ──────────────────── 基础工具 ────────────────────
 def FileMd5(path: str) -> Optional[str]:
     if not os.path.exists(path):
         return None
@@ -34,24 +34,23 @@ def PrintProgress(done: int, total: int, width: int = 50) -> None:
         return
     ratio = done / total
     bar   = "=" * int(ratio * width - 1) + ">" if ratio < 1 else "=" * width
-    sys.stdout.write(f"\r进度: [{bar:<{width}}] {ratio * 100:6.2f}%")
+    sys.stdout.write(f"\r进度: [{bar:<{width}}] {ratio*100:6.2f}%")
     sys.stdout.flush()
     if done >= total:
         sys.stdout.write("\n")
 
 
-# ──────────────────── 网络下载 ───────────────────
+# ─────────────────── 下载到临时文件 ──────────────────
 def DownloadToTemp(url: str) -> Tuple[Optional[str], Optional[str]]:
-    """下载到临时文件（关闭 gzip），返回 (TmpPath, Error)"""
     try:
-        headers = {"Accept-Encoding": "identity"}
+        headers = {"Accept-Encoding": "identity"}      # 关闭自动 gzip
         with requests.get(url, stream=True, timeout=30, headers=headers) as r:
             r.raise_for_status()
 
             total = int(r.headers.get("Content-Length", 0))
-            Debug(f"Content-Length: {total}")
-            Debug(f"Content-Type   : {r.headers.get('Content-Type')}")
-            Debug(f"Transfer-Enc   : {r.headers.get('Transfer-Encoding', 'None')}")
+            Debug(f"Content-Length : {total}")
+            Debug(f"Content-Type    : {r.headers.get('Content-Type')}")
+            Debug(f"Transfer-Enc    : {r.headers.get('Transfer-Encoding', 'None')}")
 
             downloaded = 0
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
@@ -61,19 +60,19 @@ def DownloadToTemp(url: str) -> Tuple[Optional[str], Optional[str]]:
                         downloaded += len(chunk)
                         if total:
                             PrintProgress(downloaded, total)
-            Debug(f"Downloaded      : {downloaded}")
+            Debug(f"Downloaded       : {downloaded}")
             return tmp.name, None
     except Exception as e:
         return None, f"{type(e).__name__}: {e}"
 
 
-# ──────────────────── 配置加载 ───────────────────
+# ─────────────────── 配置加载（键值对） ──────────────────
 def LoadConfigFromUrl(url: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    """仅支持键值对格式；失败返回错误文本"""
     try:
         Debug(f"下载配置 → {url}")
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
+
         mapping: Dict[str, str] = {}
         for line in resp.text.splitlines():
             line = line.strip()
@@ -82,15 +81,16 @@ def LoadConfigFromUrl(url: str) -> Tuple[Optional[Dict[str, str]], Optional[str]
             if "=" in line:
                 k, v = map(str.strip, line.split("=", 1))
                 mapping[k] = v
+
         if mapping:
             Debug("配置解析成功：键值对格式")
             return mapping, None
-        return None, "配置文件为空或无法解析为键值对格式"
+        return None, "配置为空或无有效键值对"
     except Exception as e:
         return None, f"配置下载失败: {e}"
 
 
-# ──────────────────── 同步逻辑 ───────────────────
+# ─────────────────── 同步逻辑 ────────────────────
 def SyncOne(local: str, url: str) -> None:
     Debug(f"下载链接 → {url}")
     tmp_path, err = DownloadToTemp(url)
