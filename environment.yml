@@ -12,7 +12,6 @@ dependencies:
   - openssl=3.0.16=h3f729d1_0
   - pip=25.1=pyhc872135_1
   - python=3.12.9=h14ffc60_0
-  - setuptools=78.1.1=py312haa95532_0
   - sqlite=3.45.3=h2bbff1b_0
   - tk=8.6.14=h0416ee5_0
   - tzdata=2025b=h04d1e81_0
@@ -22,10 +21,16 @@ dependencies:
   - xz=5.6.4=h4754444_1
   - zlib=1.2.13=h8cc25b3_1
   - pip:
+      - altgraph==0.17.4
       - certifi==2025.4.26
       - charset-normalizer==3.4.2
       - idna==3.10
       - packaging==25.0
+      - pefile==2023.2.7
+      - pyinstaller==6.13.0
+      - pyinstaller-hooks-contrib==2025.3
+      - pywin32-ctypes==0.2.3
       - requests==2.32.3
+      - setuptools==80.1.0
       - urllib3==2.4.0
 prefix: C:\Users\mengzhishanghun\miniconda3\envs\SimpleFileUpdater
