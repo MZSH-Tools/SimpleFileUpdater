@@ -34,7 +34,7 @@ SimpleFileUpdater/
 
 ### 1. 准备 Python 环境
 
-推荐使用 Conda 或 Python 3.11+ 环境：
+推荐使用 Conda 或 Python 3.11 环境：
 
 ```bash
 conda create -n SimpleFileUpdater python=3.11
