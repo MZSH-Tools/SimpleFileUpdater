@@ -1,10 +1,3 @@
-"""
-SimpleFileUpdater · FileSyncer
-──────────────────────────────
-核心同步模块，仅支持“键值对”配置格式：
-    LocalPath = RemoteUrl
-"""
-
 from __future__ import annotations
 import os, sys, hashlib, requests, tempfile, shutil
 from typing import Dict, Tuple, Optional

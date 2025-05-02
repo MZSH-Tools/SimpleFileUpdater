@@ -1,110 +1,76 @@
-# SimpleFileUpdater
+# SimpleFileUpdater 使用指南（本地键值对版本）
 
-一个轻量、通用的文件同步工具。你只需要提供一个远程文件映射配置，它就会自动从远程地址下载、校验并更新本地文件。
-
----
-
-## ✨ 功能特性
-
-- 支持任意 HTTP 地址的文件同步
-- 支持 JSON 或键值对格式的远程配置文件
-- 自动计算 MD5 检查文件是否需要更新
-- 同步前自动创建缺失的本地目录
-- 详细的命令行进度与状态反馈
-- 网络异常自动跳过，不影响整体流程
+SimpleFileUpdater 是一个轻量级的文件同步工具，适用于希望从远程地址批量更新本地文件的用户。程序已打包为 `SimpleFileUpdater.exe`，支持通过配置文件定义目标文件及其下载地址。
 
 ---
 
-## 📁 项目结构
+## 🧩 配置文件说明
+
+默认配置文件为 **`.SimpleFileUpdater`**，内容格式如下：
 
 ```
-SimpleFileUpdater/
-├── App/
-│   ├── FileSyncer.py   # 文件同步核心逻辑
-│   └── Main.py         # 程序入口，读取配置并执行同步
-├── .SimpleFileUpdater  # 用户配置文件（需手动创建，指向配置URL）
-├── environment.yml     # Conda 环境导出（可选）
-├── requirements.txt    # pip 依赖列表（可选）
-└── LICENSE             # 项目许可证
+# 每行一个映射：本地路径 = 远程 URL
+Tools\MyTool.exe = https://example.com/releases/MyTool.exe
+Docs\Manual.pdf  = https://cdn.example.com/docs/Manual.pdf
 ```
+
+- 支持相对路径或绝对路径
+- 自动创建所需文件夹
+- 支持注释（以 `#` 开头）
 
 ---
 
-## 🚀 使用说明
+## 🚀 如何运行
 
-### 1. 准备 Python 环境
+将 `SimpleFileUpdater.exe` 与 `.SimpleFileUpdater` 放在同一目录，然后：
 
-推荐使用 Conda 或 Python 3.11 环境：
+- **双击 `SimpleFileUpdater.exe`**，程序将自动读取配置文件并同步所需文件
+- 或者通过命令行运行：
 
 ```bash
-conda create -n SimpleFileUpdater python=3.11
+SimpleFileUpdater.exe MyConfig.txt
+```
+
+执行完成后程序会停留在命令行，等待用户按回车查看结果。
+
+---
+
+## 🧪 如何从源码运行（开发者或未打包场景）
+
+本项目提供了两种方式用于一键搭建运行环境：
+
+### 方式 1：使用 Conda（推荐）
+
+```bash
+conda env create -f environment.yml
 conda activate SimpleFileUpdater
-pip install -r requirements.txt
-```
-
-或使用已有环境手动安装：
-```bash
-pip install requests
-```
-
----
-
-### 2. 创建配置文件 `.SimpleFileUpdater`
-
-该文件中应包含远程配置地址，如：
-
-```
-https://example.com/file-map.txt
-```
-
----
-
-### 3. 远程配置格式说明
-
-配置文件支持两种格式：
-
-#### ✅ 格式一：键值对（推荐）
-
-```
-path/to/local/file1.exe = https://yourcdn.com/bin/file1.exe
-path/to/local/Config.json = https://example.com/config.json
-```
-
-#### ✅ 格式二：JSON 字典
-
-```json
-{
-  "bin/Tool.exe": "https://example.com/releases/Tool.exe",
-  "assets/logo.png": "https://cdn.com/logo.png"
-}
-```
-
----
-
-### 4. 执行同步命令
-
-```bash
 python App/Main.py
 ```
 
-程序将自动读取配置，下载远程文件并覆盖本地旧版本。
+### 方式 2：使用 pip
+
+```bash
+pip install -r requirements.txt
+python App/Main.py
+```
 
 ---
 
-## 🛡️ 错误处理与健壮性
+## 📄 许可证 License
 
-- 如果下载失败，程序将记录错误并跳过该文件
-- 本地文件若不存在，将自动创建路径并写入
-- 支持显示进度条
+本项目已包含如下许可证：
 
----
-
-## 📝 License
-
-本项目遵循 [MIT License](./LICENSE)。
+```
+（以下内容自动读取 LICENSE 文件中内容，请查看项目根目录中的 LICENSE 文件）
+```
 
 ---
 
-## 🤝 贡献建议
+## ⚠️ 免责声明
 
-欢迎提交 Issue 或 PR 来改进本项目。建议遵循 PascalCase 命名风格。
+本项目为个人工具项目，使用者需自行承担使用本工具所带来的风险。  
+请自行确认远程文件地址的可靠性与安全性，程序可能会覆盖本地同名文件，请提前备份。
+
+---
+
+本地文件同步，从未如此简单。Enjoy!
