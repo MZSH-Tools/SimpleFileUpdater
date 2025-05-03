@@ -1,5 +1,5 @@
 import sys, os
-from FileSyncer import SyncFiles
+from Source.FileSyncer import SyncFiles
 
 DEFAULT_CONFIG = ".SimpleFileUpdater"
 CONFIG_FILE    = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(DEFAULT_CONFIG)
