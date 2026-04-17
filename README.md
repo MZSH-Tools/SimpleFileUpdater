@@ -44,14 +44,14 @@ SimpleFileUpdater.exe MyConfig.txt
 ```bash
 conda env create -f environment.yml
 conda activate SimpleFileUpdater
-python App/Main.py
+python Main.py
 ```
 
 ### 方式 2：使用 pip
 
 ```bash
 pip install -r requirements.txt
-python App/Main.py
+python Main.py
 ```
 
 ---

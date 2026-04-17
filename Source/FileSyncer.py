@@ -1,9 +1,13 @@
 from __future__ import annotations
-import os, sys, hashlib, requests, tempfile, shutil
+import os, sys, time, hashlib, requests, tempfile, shutil
 from typing import Dict, Tuple, Optional
 
-CHUNK_SIZE: int = 8192      # 每次读取 8 KB
-VERBOSE: bool = True        # True → 打印 DEBUG 日志
+CHUNK_SIZE: int = 8192          # 每次读取 8 KB
+VERBOSE: bool = True            # True → 打印 DEBUG 日志
+MAX_RETRY: int = 3              # 下载失败最多重试次数
+RETRY_BACKOFF: float = 1.5      # 重试退避基数（秒）
+HTTP_TIMEOUT: int = 30
+USER_AGENT: str = "SimpleFileUpdater/1.0 (+https://github.com/MZSH-Tools/SimpleFileUpdater)"
 
 
 # ──────────────────── 工具 ────────────────────
@@ -35,86 +39,112 @@ def PrintProgress(done: int, total: int, width: int = 50) -> None:
 
 # ─────────────────── 下载到临时文件 ──────────────────
 def DownloadToTemp(url: str) -> Tuple[Optional[str], Optional[str]]:
-    try:
-        headers = {"Accept-Encoding": "identity"}      # 关闭自动 gzip
-        with requests.get(url, stream=True, timeout=30, headers=headers) as r:
-            r.raise_for_status()
+    headers = {
+        "Accept-Encoding": "identity",   # 关闭自动 gzip，确保 Content-Length 可用
+        "User-Agent": USER_AGENT,
+    }
 
-            total = int(r.headers.get("Content-Length", 0))
-            Debug(f"Content-Length : {total}")
-            Debug(f"Content-Type    : {r.headers.get('Content-Type')}")
-            Debug(f"Transfer-Enc    : {r.headers.get('Transfer-Encoding', 'None')}")
+    last_err: Optional[str] = None
+    for attempt in range(1, MAX_RETRY + 1):
+        tmp_path: Optional[str] = None
+        try:
+            with requests.get(url, stream=True, timeout=HTTP_TIMEOUT, headers=headers, allow_redirects=True) as r:
+                r.raise_for_status()
 
-            downloaded = 0
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                for chunk in r.iter_content(CHUNK_SIZE):
-                    if chunk:
-                        tmp.write(chunk)
-                        downloaded += len(chunk)
-                        if total:
-                            PrintProgress(downloaded, total)
-            Debug(f"Downloaded       : {downloaded}")
-            return tmp.name, None
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
+                total = int(r.headers.get("Content-Length", 0))
+                Debug(f"[尝试 {attempt}] Content-Length: {total}")
+                Debug(f"[尝试 {attempt}] Content-Type  : {r.headers.get('Content-Type')}")
 
+                downloaded = 0
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp_path = tmp.name
+                    for chunk in r.iter_content(CHUNK_SIZE):
+                        if chunk:
+                            tmp.write(chunk)
+                            downloaded += len(chunk)
+                            if total:
+                                PrintProgress(downloaded, total)
 
-# ─────────────────── 配置加载（键值对） ──────────────────
-def LoadConfigFromUrl(url: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    try:
-        Debug(f"下载配置 → {url}")
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
+                if total and downloaded != total:
+                    raise IOError(f"下载字节数与 Content-Length 不一致: {downloaded} / {total}")
 
-        mapping: Dict[str, str] = {}
-        for line in resp.text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                k, v = map(str.strip, line.split("=", 1))
-                mapping[k] = v
+                Debug(f"[尝试 {attempt}] Downloaded    : {downloaded}")
+                return tmp_path, None
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            # 清理半成品
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            if attempt < MAX_RETRY:
+                wait = RETRY_BACKOFF * attempt
+                Debug(f"[尝试 {attempt}] 失败: {last_err} → {wait:.1f}s 后重试")
+                time.sleep(wait)
 
-        if mapping:
-            Debug("配置解析成功：键值对格式")
-            return mapping, None
-        return None, "配置为空或无有效键值对"
-    except Exception as e:
-        return None, f"配置下载失败: {e}"
+    return None, last_err
 
 
 # ─────────────────── 同步逻辑 ────────────────────
-def SyncOne(local: str, url: str) -> None:
+def SyncOne(local: str, url: str) -> bool:
     Debug(f"下载链接 → {url}")
     tmp_path, err = DownloadToTemp(url)
     if err:
         print(f"❌ 下载失败: {err}")
-        return
+        return False
 
+    abs_local = os.path.abspath(local)
     remote_md5 = FileMd5(tmp_path)
-    local_md5  = FileMd5(local)
+    local_md5  = FileMd5(abs_local)
     Debug(f"远端 MD5: {remote_md5}")
     Debug(f"本地 MD5: {local_md5 or 'None'}")
 
     if remote_md5 == local_md5:
-        os.remove(tmp_path)
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
         print("✔ 已是最新")
-        return
+        return True
 
-    os.makedirs(os.path.dirname(local) or ".", exist_ok=True)
-    shutil.move(tmp_path, local)
+    parent = os.path.dirname(abs_local)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    try:
+        shutil.move(tmp_path, abs_local)
+    except Exception as e:
+        print(f"❌ 写入失败: {type(e).__name__}: {e}")
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        return False
+
     print("🆕 已创建" if local_md5 is None else "🔄 已更新")
+    return True
 
 
-def SyncFiles(mapping: Dict[str, str]) -> None:
+def SyncFiles(mapping: Dict[str, str]) -> int:
+    """同步所有文件，返回失败条目数"""
     total = len(mapping)
+    failed = 0
     print(f"\n开始同步，共 {total} 个文件\n")
     for idx, (local, url) in enumerate(mapping.items(), 1):
         print(f"[{idx}/{total}] 处理: {local}")
         try:
-            SyncOne(local, url)
+            if not SyncOne(local, url):
+                failed += 1
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            print(f"❌ 未知错误: {e}")
-    print("\n✅ 同步完成")
+            print(f"❌ 未知错误: {type(e).__name__}: {e}")
+            failed += 1
+
+    if failed:
+        print(f"\n⚠️  同步完成，{failed} 个文件失败")
+    else:
+        print("\n✅ 同步完成")
+    return failed

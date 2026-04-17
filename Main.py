@@ -2,7 +2,7 @@ import sys, os
 from Source.FileSyncer import SyncFiles
 
 DEFAULT_CONFIG = ".SimpleFileUpdater"
-CONFIG_FILE    = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(DEFAULT_CONFIG)
+
 
 def LoadLocalMapping(file_name: str):
     if not os.path.exists(file_name):
@@ -22,18 +22,29 @@ def LoadLocalMapping(file_name: str):
         return mapping, None
     return None, "配置为空或无有效键值对"
 
-def main():
+
+def main() -> int:
     print("SimpleFileUpdater 启动中…")
 
-    mapping, err = LoadLocalMapping(CONFIG_FILE)
+    config_file = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(DEFAULT_CONFIG)
+
+    mapping, err = LoadLocalMapping(config_file)
     if err:
         print("加载配置失败:", err)
-        input("\n按回车键退出…")
-        return
+        try:
+            input("\n按回车键退出…")
+        except EOFError:
+            pass
+        return 2
 
-    SyncFiles(mapping)
+    failed = SyncFiles(mapping)
     print("SimpleFileUpdater 完成")
-    input("\n同步已结束，按回车键关闭窗口…")
+    try:
+        input("\n同步已结束，按回车键关闭窗口…")
+    except EOFError:
+        pass
+    return 1 if failed else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
