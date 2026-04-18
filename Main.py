@@ -1,4 +1,10 @@
 import sys, os
+
+# Windows 控制台默认 GBK，输出 ✔ ❌ 等特殊符号会崩，强制切 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 from Source.FileSyncer import SyncFiles
 
 DEFAULT_CONFIG = ".SimpleFileUpdater"
